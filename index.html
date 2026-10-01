@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Radar Inversión Bogotá</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* Layout: barra de filtros → mapa ancho completo → franja KPI → rejilla de módulos (tabla+gráfico) → tabla maestra */
+:root{
+  --bg:#F3F5F4; --surface:#FFFFFF; --ink:#18222B; --muted:#5D6B74; --line:#DCE2E1;
+  --accent:#B0482A;          /* ladrillo bogotano */
+  --own:#1F6F78;             /* proyecto propio */
+  --s1:#2E7D6B; --s2:#8CB369; --s3:#E0B648; --s4:#D97A3A; --s5:#A93226; /* escala COP/m² */
+  --chip:#E8ECEB;
+  --f-display:"Familjen Grotesk","Helvetica Neue",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);padding-inline:clamp(16px,3vw,40px);padding-block:28px 60px}
+.wrap{max-width:1360px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(28px,4vw,42px);font-weight:700;line-height:1.05}
+h2{font-size:21px;font-weight:600}
+h3{font-size:16px;font-weight:600}
+.eyebrow{font:500 11.5px var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.sub{color:var(--muted);max-width:70ch;margin:6px 0 0}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px}
+.num{font-variant-numeric:tabular-nums}
+/* filtros */
+.filters{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.filters label{display:flex;flex-direction:column;gap:4px;font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+select,button{font:500 14px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 10px}
+button{cursor:pointer}
+button:hover{border-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:var(--bg)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.count{margin-left:auto;font:500 13px var(--f-mono);color:var(--muted)}
+/* mapa */
+.mapbox{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+#map{height:min(68vh,640px);min-height:420px;width:100%}
+.legend{position:absolute;z-index:500;left:12px;bottom:12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px;max-width:calc(100% - 24px)}
+.legend .ttl{font:500 10.5px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.legend .row{display:flex;gap:8px;align-items:center}
+.legend .bar{display:flex;gap:2px}
+.legend .bar i{width:26px;height:8px;border-radius:2px;display:block}
+.legend .scale{display:flex;justify-content:space-between;font:11px var(--f-mono);color:var(--muted);margin-top:3px}
+.legend .ownk{margin-top:8px;display:flex;gap:6px;align-items:center}
+.dia{width:14px;height:14px;background:var(--own);transform:rotate(45deg);border:2px solid #fff;box-shadow:0 0 0 1px var(--own)}
+.leaflet-container{font-family:var(--f-body);background:var(--bg)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--ink)}
+.leaflet-popup-content{margin:12px 14px;min-width:230px}
+.pp h4{margin:0 0 2px;font:600 16px var(--f-display)}
+.pp .b{color:var(--muted);font-size:12.5px;margin-bottom:8px}
+.pp dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0;font-size:12.5px}
+.pp dt{color:var(--muted)} .pp dd{margin:0;font-variant-numeric:tabular-nums}
+.pp a{color:var(--accent);font-weight:600}
+.lbl{background:transparent;border:0;box-shadow:none;font:600 11px var(--f-body);color:var(--ink);text-shadow:0 0 3px var(--surface),0 0 3px var(--surface),0 0 2px var(--surface)}
+.lbl:before{display:none}
+#map.hide-lbl .lbl{display:none}
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.kpi{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .k{font:500 10.5px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font:600 24px var(--f-display);font-variant-numeric:tabular-nums}
+.kpi .d{font-size:12px;color:var(--muted)}
+/* módulos */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:20px}
+.mod{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mod .hd{display:flex;flex-direction:column;gap:2px}
+.mod .hd p{margin:0;color:var(--muted);font-size:13px}
+.mod.wide{grid-column:1/-1}
+.cv{position:relative;height:300px}
+.cv.tall{height:560px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:500 10.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--surface);position:sticky;top:0}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--chip)}
+th.sort{cursor:pointer;user-select:none}
+th.sort:hover{color:var(--ink)}
+th[data-dir="asc"]:after{content:" ▲"} th[data-dir="desc"]:after{content:" ▼"}
+tr.own td{background:color-mix(in srgb,var(--own) 12%,transparent)}
+tr.own td:first-child{box-shadow:inset 3px 0 0 var(--own)}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--chip);white-space:nowrap}
+.pill.priv{background:color-mix(in srgb,var(--s1) 22%,transparent)}
+.pill.com{background:color-mix(in srgb,var(--s3) 30%,transparent)}
+.pill.mix{background:color-mix(in srgb,var(--s2) 28%,transparent)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.insight{font-size:13px;color:var(--ink);background:var(--chip);border-radius:8px;padding:9px 12px;margin:0}
+a.lk{color:var(--accent);text-decoration:none;font-weight:500} a.lk:hover{text-decoration:underline}
+.goto{background:none;border:0;padding:0;color:var(--ink);font:600 13.5px var(--f-body);cursor:pointer;text-align:left}
+.goto:hover{color:var(--accent)}
+/* benchmark propio */
+.bench{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px}
+.bm{display:flex;flex-direction:column;gap:6px;min-width:0}
+.bm .k{font:500 10.5px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.bm .v{font:600 20px var(--f-display);font-variant-numeric:tabular-nums}
+.track{position:relative;height:26px}
+.track .ln{position:absolute;left:0;right:0;top:12px;height:2px;background:var(--line)}
+.track .tk{position:absolute;top:7px;width:2px;height:12px;background:var(--muted);opacity:.55}
+.track .me{position:absolute;top:4px;width:14px;height:14px;margin-left:-7px;background:var(--own);transform:rotate(45deg);border:2px solid var(--surface)}
+.track .avg{position:absolute;top:2px;width:2px;height:22px;background:var(--accent)}
+.bm .d{font-size:12px;color:var(--muted)}
+footer{color:var(--muted);font-size:12.5px;max-width:90ch}
+/* punto de referencia */
+.refbar{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px}
+.refbar .ttl{display:flex;flex-direction:column;gap:2px;min-width:0;flex:0 1 220px}
+.refbar .ttl b{font:600 15px var(--f-display)}
+.refbar .ttl span{font-size:12px;color:var(--muted)}
+.refbar label{display:flex;flex-direction:column;gap:4px;font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.refbar input{font:400 14px var(--f-mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 10px;width:min(320px,80vw)}
+.refbar button.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.refbar button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.refmsg{font-size:12.5px;color:var(--muted);flex-basis:100%;margin:0}
+.refmsg.err{color:var(--s5)}
+.pin{width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--accent);transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+#map.picking{cursor:crosshair}
+#map.picking .leaflet-interactive{cursor:crosshair}
+.near{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.near .kpi{padding:10px 14px}
+.near .kpi .v{font-size:19px}
+@media (max-width:600px){#map{min-height:380px}.count{margin-left:0;width:100%}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <div class="eyebrow">Benchmark · vivienda nueva · Bogotá</div>
+    <h1>Radar Inversión Bogotá</h1>
+    <p class="sub">28 proyectos sobre planos geolocalizados por dirección. Valores "desde" según la fuente de cada proyecto. El rombo marca el proyecto futuro de Quinta Paredes.</p>
+  </div>
+</header>
+
+<section class="filters" aria-label="Filtros">
+  <label for="fLoc">Localidad<select id="fLoc"></select></label>
+  <label for="fParq">Parqueadero<select id="fParq"></select></label>
+  <label for="fAcab">Acabados<select id="fAcab"></select></label>
+  <label for="fArea">Área desde<select id="fArea">
+    <option value="">Todas</option><option value="0-30">&lt; 30 m²</option><option value="30-50">30 – 50 m²</option><option value="50-80">50 – 80 m²</option><option value="80-999">≥ 80 m²</option></select></label>
+  <label>Color del punto<span class="seg" role="group"><button type="button" id="cM2" aria-pressed="true">COP/m²</button><button type="button" id="cPr" aria-pressed="false">Precio</button></span></label>
+  <button type="button" id="reset">Limpiar filtros</button>
+  <span class="count" id="count"></span>
+</section>
+
+<section class="refbar" aria-label="Punto de referencia">
+  <div class="ttl"><b>Punto de referencia</b><span>Ubica un lote o dirección y mide la competencia a su alrededor.</span></div>
+  <label for="refIn">Coordenadas o enlace de Google Maps<input id="refIn" type="text" placeholder="4.6335, -74.0961" autocomplete="off"></label>
+  <button type="button" class="pri" id="refGo">Ubicar</button>
+  <button type="button" id="refPick" aria-pressed="false">Marcar en el mapa</button>
+  <button type="button" id="refMe">Mi ubicación</button>
+  <label for="refR">Radio<select id="refR"><option value="0">Sin radio</option><option value="500">500 m</option><option value="1000">1 km</option><option value="2000">2 km</option><option value="3000">3 km</option><option value="5000">5 km</option></select></label>
+  <button type="button" id="refClr" hidden>Quitar punto</button>
+  <p class="refmsg" id="refMsg">Pega coordenadas, un enlace de Google Maps, o haz clic en "Marcar en el mapa". El pin se puede arrastrar.</p>
+</section>
+
+<div class="mapbox">
+  <div id="map" role="region" aria-label="Mapa de proyectos"></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<section class="kpis" id="kpis" aria-label="Indicadores"></section>
+
+<section class="mod wide" id="refMod" hidden>
+  <div class="hd"><div class="eyebrow">Alrededor del punto</div><h2 id="refTitle">Competencia cercana</h2>
+  <p id="refSub"></p></div>
+  <div class="near" id="refKpis"></div>
+  <div class="tw"><table id="tNear"></table></div>
+</section>
+
+<section class="mod wide" id="benchMod">
+  <div class="hd"><div class="eyebrow">Posicionamiento</div><h2>Futuro Quinta Paredes frente a la competencia</h2>
+  <p>Cada marca gris es un proyecto del filtro actual; la línea ladrillo es el promedio y el rombo es el proyecto propio.</p></div>
+  <div class="bench" id="bench"></div>
+  <p class="insight" id="benchTxt"></p>
+</section>
+
+<div class="grid">
+  <section class="mod">
+    <div class="hd"><h2>Resumen por localidad</h2><p>Promedios de valores "desde".</p></div>
+    <div class="tw"><table id="tLoc"></table></div>
+    <div class="cv"><canvas id="chLoc"></canvas></div>
+    <p class="insight" id="iLoc"></p>
+  </section>
+  <section class="mod">
+    <div class="hd"><h2>Resumen por rango de área</h2><p>Según el área mínima ofrecida.</p></div>
+    <div class="tw"><table id="tArea"></table></div>
+    <div class="cv"><canvas id="chArea"></canvas></div>
+    <p class="insight" id="iArea"></p>
+  </section>
+  <section class="mod">
+    <div class="hd"><h2>Precio vs. área</h2><p>Ticket de entrada frente al área mínima. Color por localidad.</p></div>
+    <div class="cv"><canvas id="chSc"></canvas></div>
+  </section>
+  <section class="mod">
+    <div class="hd"><h2>Parqueadero y acabados</h2><p>Cómo cambia el COP/m² según lo que incluye el producto.</p></div>
+    <div class="tw"><table id="tParq"></table></div>
+    <div class="tw"><table id="tAcab"></table></div>
+    <p class="insight" id="iPA"></p>
+  </section>
+  <section class="mod wide">
+    <div class="hd"><h2>Ranking COP/m²</h2><p>De mayor a menor. La línea vertical es el promedio del filtro.</p></div>
+    <div class="cv tall" id="cvRank"><canvas id="chRank"></canvas></div>
+  </section>
+  <section class="mod wide">
+    <div class="hd"><h2>Todos los proyectos</h2><p>Haz clic en un encabezado para ordenar y en el nombre para ubicarlo en el mapa.</p></div>
+    <div class="tw"><table id="tAll"></table></div>
+  </section>
+</div>
+
+<footer>Geolocalización: direcciones buscadas una a una en Google Maps (octubre 2026). Heritage 97 se ubicó en Cra. 14 #97-34 y Pinar 24 en su sala de ventas. Futuro Quinta Paredes no tiene dirección en la base y se ubicó en el centro del barrio (posición aproximada). Las distancias al punto de referencia son en línea recta. Localidad asignada por ubicación.</footer>
+</div>
+
+<script>
+const DATA = [{"id": 0, "n": "Elemental Usaquén (Elemental 127)", "barrio": "Santa Bárbara Oriental ", "dir": "Cra. 7B #126-84 (sala de negocios)", "loc": "Usaquén", "m2": 12139885, "area": 117.1, "precio": 1422066152, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí: 1 a 2 según el apto (ej. 47,9 m²: 1; 2 hab grandes: 2)", "url": "https://elementalusaquen.com", "lat": 4.7022096, "lng": -74.0303423, "own": false}, {"id": 1, "n": "Nahikú", "barrio": "Santa Paula ", "dir": "Cra. 14 #108-36", "loc": "Usaquén", "m2": 12383721, "area": 86.0, "precio": 1065000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí: 1 en 86 m²; doble en 114 m²", "url": "https://www.lahaus.com/pd/bogota/nahiku", "lat": 4.691345, "lng": -74.04313, "own": false}, {"id": 2, "n": "Element 142", "barrio": "Cedritos ", "dir": "Cra. 23 #142-65", "loc": "Usaquén", "m2": 13579535, "area": 55.5, "precio": 753800000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, incluido (603 privados para aptos No VIS)", "url": "https://www.ciencuadras.com/proyecto-de-vivienda/constructora-capital-bogota-sas-element-142-bogota-2614", "lat": 4.725501, "lng": -74.049746, "own": false}, {"id": 3, "n": "Artek Urban", "barrio": "Santa Paula ", "dir": "Cl. 104 #14A-16", "loc": "Usaquén", "m2": 13888889, "area": 54.0, "precio": 750000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, independiente: 1 en aptos de 54 a 83 m²; 2 en 114 m²", "url": "https://www.fincaraiz.com.co/proyectos-vivienda/artek-urban-apartamentos-en-venta-en-santa-paula-bogota/15018758", "lat": 4.6884539, "lng": -74.0454535, "own": false}, {"id": 4, "n": "Libbe 126", "barrio": "Santa Bárbara Oriental ", "dir": "Cl. 126 #7B-50", "loc": "Usaquén", "m2": 10514305, "area": 78.0, "precio": 738000000, "acab": "Sin info", "acabTxt": "No específican", "parq": "Privado", "parqTxt": "Sí, 1 a 2 según el apto", "url": "https://www.coandes.com/libbe-2/", "lat": 4.7017323, "lng": -74.0314195, "own": false}, {"id": 5, "n": "Select 68", "barrio": "Ciudad Salitre (Nuevo Salitre), Puente Aranda", "dir": "Av. 68 #20-24", "loc": "Puente Aranda", "m2": 11197000, "area": 64.0, "precio": 716794537, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, 810 privados + 70 de visitantes (700 aptos)", "url": "https://www.constructoracapital.com/lpage/257/select-68/16", "lat": 4.6439597, "lng": -74.1111428, "own": false}, {"id": 6, "n": "Boreal", "barrio": "Américas Central", "dir": "Av. Cl. 6 #68-45 ", "loc": "Kennedy", "m2": 8378000, "area": 74.0, "precio": 620000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, 1.152 parqueaderos para ~1.000 aptos (privado/comunal no confirmado)", "url": "https://amarilo.com.co/proyecto/boreal?gad_source=1&gad_campaignid=24077544610&gbraid=0AAAABCwCo0s_ihMoHa-MdKlH_UqMEbQNx&gclid=CjwKCAjw-rTUBhAiEiwADv8gBEdejLJ8jAnAVqzeff4kdATCvLzskX3CQLV3N-mIqz-Cgd3gv1IMfxoCRzIQAvD_BwE", "lat": 4.6283178, "lng": -74.12341, "own": false}, {"id": 7, "n": "Menta", "barrio": "Belmira del Country ", "dir": "Cra. 7A #146-89", "loc": "Usaquén", "m2": 11235955, "area": 48.1, "precio": 540000000, "acab": "Sin info", "acabTxt": "No específican", "parq": "Privado", "parqTxt": "Sí, sencillo o doble según área", "url": "https://www.ciencuadras.com/proyecto-de-vivienda/umbral-propiedad-raiz-sas-menta-bogota-2276", "lat": 4.7223277, "lng": -74.0271757, "own": false}, {"id": 8, "n": "Aura", "barrio": "Antiguo Country / El Virrey, Chapinero", "dir": "Cra. 19B #85-30", "loc": "Chapinero", "m2": 18145455, "area": 27.5, "precio": 499000000, "acab": "Con acabados", "acabTxt": "SÍ", "parq": "Privado", "parqTxt": "Sí", "url": "https://tecnourbana.com.co/aura/", "lat": 4.6720077, "lng": -74.0581251, "own": false}, {"id": 9, "n": "Star 108", "barrio": "San Patricio ", "dir": "Cl. 108 #15A-14", "loc": "Usaquén", "m2": 13500857, "area": 35.0, "precio": 472800000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, privado (relación 1 a 1)", "url": "https://www.fincaraiz.com.co/proyectos-vivienda/star-108-apartamentos-en-venta-en-san-patricio-bogota/15018774", "lat": 4.6925087, "lng": -74.0460346, "own": false}, {"id": 10, "n": "TEI 146", "barrio": "Belmira ", "dir": "Cl. 146 #7F-51", "loc": "Usaquén", "m2": 9972286, "area": 43.3, "precio": 431800000, "acab": "Sin info", "acabTxt": "No específican", "parq": "Privado", "parqTxt": "Sí, 1 incluido (con 1 depósito)", "url": "https://www.ciencuadras.com/proyecto-de-vivienda/coandes-sas-tei-146-bogota-2129", "lat": 4.723201, "lng": -74.0309709, "own": false}, {"id": 11, "n": "Viu Park Home", "barrio": "Santa Bárbara Occidental ", "dir": "Cra. 45 #116-76", "loc": "Usaquén", "m2": 14414517, "area": 29.0, "precio": 418021000, "acab": "Con acabados", "acabTxt": "Sí, terminados", "parq": "Comunal", "parqTxt": "Comunal: 74 cupos (50 propietarios y 24 visitantes)", "url": "https://www.lahaus.com/pd/bogota/viu-park-home", "lat": 4.7002209, "lng": -74.0544011, "own": false}, {"id": 12, "n": "Futuro Quinta Paredes", "barrio": "Quinta Paredes", "dir": "No encontrado", "loc": "Teusaquillo", "m2": 10405405, "area": 37.0, "precio": 385000000, "acab": "Parciales", "acabTxt": "Acabados parciales", "parq": "Comunal", "parqTxt": "23 comunales asignados por sorteo (no se venden) + ~300 cupos de moto/bici", "url": "", "lat": 4.6335068, "lng": -74.0960995, "own": true}, {"id": 13, "n": "LIV 7-24", "barrio": "Santa Bárbara Oriental", "dir": "Cl. 126A #7C-15", "loc": "Usaquén", "m2": 14525353, "area": 26.2, "precio": 381000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Privado", "parqTxt": "Sí, incluido en el precio (con depósito)", "url": "https://liv724.com", "lat": 4.7021582, "lng": -74.031751, "own": false}, {"id": 14, "n": "Heritage 97", "barrio": "Chicó Norte II, Chapinero ", "dir": "Cra. 14 #97-34", "loc": "Chapinero", "m2": 14182980, "area": 25.0, "precio": 355000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Comunal", "parqTxt": "Comunal en aptos de 25 a 36 m²; 1 propio en el de 60 m²", "url": "https://www.buenvivir.co/proyectos/heritage-97", "lat": 4.6825314, "lng": -74.0481189, "own": false}, {"id": 15, "n": "Centrix 145", "barrio": "Prado Pinzón", "dir": "Cl. 145 #45-10", "loc": "Suba", "m2": 9830603, "area": 36.0, "precio": 354000000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal: 32 cupos (1 por cada 10 unidades)", "url": "https://www.fincaraiz.com.co/proyectos-vivienda/centrix-145-apartamentos-en-venta-en-prado-pinzon-bogota/15017900", "lat": 4.7273491, "lng": -74.0510615, "own": false}, {"id": 16, "n": "Novara 143", "barrio": "Los Cedros / Cedritos ", "dir": "Cl. 143 #16A-07", "loc": "Usaquén", "m2": 11110708, "area": 31.4, "precio": 348654020, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Mixto / opcional", "parqTxt": "Sí en aptos de 1 a 3 hab; los lofts no tienen", "url": "https://www.lahaus.com/pd/bogota/novara-143", "lat": 4.7243694, "lng": -74.0429006, "own": false}, {"id": 17, "n": "Avenida Colón", "barrio": "Industrial Centenario / El Ejido, Puente Aranda ", "dir": "Cl. 13 #37-51", "loc": "Puente Aranda", "m2": 10579688, "area": 32.0, "precio": 338550000, "acab": "Obra gris", "acabTxt": "Obra gris", "parq": "Comunal", "parqTxt": "Comunal (cubierto)", "url": "https://prodesa.com/proyecto-vivienda/bogota/avenida-colon", "lat": 4.6196108, "lng": -74.0983028, "own": false}, {"id": 18, "n": "Paloverde", "barrio": "Santa Bibiana ", "dir": "Cra. 22 #101-82", "loc": "Usaquén", "m2": 14741696, "area": 22.6, "precio": 333752000, "acab": "Sin info", "acabTxt": "No detallado", "parq": "Sin info", "parqTxt": "No encontrado (la ficha no lo detalla)", "url": "https://www.fincaraiz.com.co/proyectos-vivienda/paloverde-apartamentos-en-venta-en-santa-bibiana-bogota/15018668", "lat": 4.6881503, "lng": -74.0549146, "own": false}, {"id": 19, "n": "Gran Central", "barrio": "Gran América ", "dir": "Cra. 31 #25A-50", "loc": "Teusaquillo", "m2": 12022000, "area": 25.4, "precio": 305789000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "No para carros; solo visitantes y motos", "url": "https://dom-re.com/proyectos/gran-central/", "lat": 4.626477, "lng": -74.082839, "own": false}, {"id": 20, "n": "Pinar 24", "barrio": "Modelia", "dir": "Av. de la Esperanza con Av. Ciudad de Cali (esquina)", "loc": "Fontibón", "m2": 11000000, "area": 27.5, "precio": 303000000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal: 224 cupos (1 por cada 6 unidades) + 90 de visitantes", "url": "https://www.construccionesplanificadas.com/portfolio/pinar-24-vis/", "lat": 4.6724417, "lng": -74.125262, "own": false}, {"id": 21, "n": "Mare 44", "barrio": "Gorgonzola / El Ejido, Puente Aranda", "dir": "Cl. 13 #44-20", "loc": "Puente Aranda", "m2": 7897793, "area": 35.5, "precio": 280084165, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal: 47 en la Etapa 1 (32 residentes, 14 visitantes, 1 movilidad reducida)", "url": "https://constructoracolpatria.com/sites/mare44/", "lat": 4.6243356, "lng": -74.1028093, "own": false}, {"id": 22, "n": "Eskala", "barrio": "Puente Aranda ", "dir": "Ak. 50 #5F-19 ", "loc": "Puente Aranda", "m2": 6972000, "area": 39.7, "precio": 276739000, "acab": "Sin info", "acabTxt": "No detallado", "parq": "Comunal", "parqTxt": "Comunal: 314 cupos (1 por cada 5,3 aptos) + 112 de visitantes", "url": "https://www.constructoracapital.com/proyecto/2/bogota-y-alrededores/puente-aranda/229/eskala", "lat": 4.6251553, "lng": -74.1090388, "own": false}, {"id": 23, "n": "UBA Studios", "barrio": "Santa Bárbara Oriental (estrato 5)", "dir": "Cl. 120 #7-66", "loc": "Usaquén", "m2": 10300000, "area": 26.7, "precio": 275010000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Mixto / opcional", "parqTxt": "Opcional: compra aparte solo en aptos desde 58 m²; los de 29 m² no tienen.", "url": "https://habitusconstrucciones.com.co/proyectos/uba/", "lat": 4.6973861, "lng": -74.0324941, "own": false}, {"id": 24, "n": "Centrik Park", "barrio": "Industrial Centenario, Puente Aranda", "dir": "Cl. 13 #38-54", "loc": "Puente Aranda", "m2": 8530000, "area": 30.0, "precio": 255900000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal y de visitantes; no hay privado", "url": "https://proyectos.ingeurbe.com/proyectos/centrik-park/", "lat": 4.6209242, "lng": -74.0977513, "own": false}, {"id": 25, "n": "Altus 124", "barrio": "Santa Bárbara Oriental ", "dir": "Cra. 7A #124-76 ", "loc": "Usaquén", "m2": 13806630, "area": 18.1, "precio": 249900000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal, con punto eléctrico (sin cantidad publicada)", "url": "https://apartaestudiosaltus124.com", "lat": 4.7009358, "lng": -74.0302881, "own": false}, {"id": 26, "n": "Corner View 147", "barrio": "Caobos Salazar ", "dir": "Cl. 147 #13-26", "loc": "Usaquén", "m2": 11714286, "area": 21.0, "precio": 246000000, "acab": "Sin acabados", "acabTxt": "No", "parq": "Comunal", "parqTxt": "Comunal (1 por cada 6 unidades)", "url": "https://www.lahaus.com/pd/bogota/corner-view-147", "lat": 4.7279502, "lng": -74.0372864, "own": false}, {"id": 27, "n": "Kobe 50", "barrio": "Teusaquillo (Alfonso López)", "dir": "Cl. 50 #19-38", "loc": "Teusaquillo", "m2": 10500000, "area": 22.4, "precio": 235000000, "acab": "Con acabados", "acabTxt": "Sí", "parq": "Mixto / opcional", "parqTxt": "Sí, para los de 48 m²", "url": "https://kobe50.com/", "lat": 4.6384378, "lng": -74.0715248, "own": false}];
+const $ = s => document.querySelector(s);
+const fmtM = v => '$' + (v/1e6).toLocaleString('es-CO',{maximumFractionDigits:1}) + ' M';
+const fmtCOP = v => '$' + Math.round(v).toLocaleString('es-CO');
+const fmtM2k = v => '$' + (v/1e6).toLocaleString('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' M';
+const avg = a => a.length ? a.reduce((s,x)=>s+x,0)/a.length : NaN;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const OWN = DATA.find(d=>d.own);
+const LOC_COL = {"Usaquén":"#2E6FB0","Chapinero":"#8E4FB0","Suba":"#2E9C8A","Teusaquillo":"#1F6F78","Puente Aranda":"#D08A2C","Kennedy":"#B0482A","Fontibón":"#6F8F2E"};
+
+function opts(sel, vals){ sel.innerHTML = '<option value="">Todas</option>' + vals.map(v=>`<option>${v}</option>`).join(''); }
+const uniq = k => [...new Set(DATA.map(d=>d[k]))].sort((a,b)=>a.localeCompare(b,'es'));
+opts($('#fLoc'), uniq('loc')); opts($('#fParq'), uniq('parq')); opts($('#fAcab'), uniq('acab'));
+
+let colorBy = 'm2';
+function filtered(){
+  const L=$('#fLoc').value, P=$('#fParq').value, A=$('#fAcab').value, R=$('#fArea').value;
+  return DATA.filter(d=>{
+    if(L && d.loc!==L) return false;
+    if(P && d.parq!==P) return false;
+    if(A && d.acab!==A) return false;
+    if(R){const [a,b]=R.split('-').map(Number); if(!(d.area>=a && d.area<b)) return false;}
+    if(REF && RAD && !d.own && distTo(d)>RAD) return false;
+    return true;
+  });
+}
+// ---------- PUNTO DE REFERENCIA ----------
+let REF=null, RAD=0, picking=false, refMarker=null, refCircle=null;
+function hav(a,b,c,d){const R=6371000,t=Math.PI/180,dl=(c-a)*t,dn=(d-b)*t,x=Math.sin(dl/2)**2+Math.cos(a*t)*Math.cos(c*t)*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
+function distTo(d){ return REF? hav(REF[0],REF[1],d.lat,d.lng) : NaN; }
+const fmtD = m => m<1000? Math.round(m)+' m' : (m/1000).toLocaleString('es-CO',{maximumFractionDigits:1})+' km';
+function parseRef(s){
+  s=(s||'').trim(); let m;
+  if((m=s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/))) return [+m[1],+m[2]];
+  if((m=s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/))) return [+m[1],+m[2]];
+  if((m=s.match(/(-?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)/))){
+    const a=+m[1].replace(',','.'), b=+m[2].replace(',','.'); if(Math.abs(a)<=90&&Math.abs(b)<=180) return [a,b]; }
+  return null;
+}
+function refMsg(t,err){ const e=$('#refMsg'); e.textContent=t; e.classList.toggle('err',!!err); }
+function setRef(ll,src){
+  REF=[+ll[0].toFixed(6),+ll[1].toFixed(6)];
+  $('#refIn').value=REF[0]+', '+REF[1];
+  $('#refClr').hidden=false;
+  const far = DATA.every(d=>hav(REF[0],REF[1],d.lat,d.lng)>30000);
+  refMsg((src||'Punto ubicado')+' en '+REF[0]+', '+REF[1]+'. Arrastra el pin para moverlo.'+(far?' Ojo: está a más de 30 km de todos los proyectos.':''));
+  render(true);
+}
+function clearRef(){ REF=null; $('#refClr').hidden=true; $('#refIn').value=''; refMsg('Pega coordenadas, un enlace de Google Maps, o haz clic en "Marcar en el mapa". El pin se puede arrastrar.'); render(); }
+function drawRef(){
+  if(refMarker){map.removeLayer(refMarker);refMarker=null;} if(refCircle){map.removeLayer(refCircle);refCircle=null;}
+  if(!REF) return;
+  if(RAD) refCircle=L.circle(REF,{radius:RAD,color:css('--accent'),weight:1.5,dashArray:'6 5',fillColor:css('--accent'),fillOpacity:.06,interactive:false}).addTo(map);
+  refMarker=L.marker(REF,{draggable:true,zIndexOffset:2000,icon:L.divIcon({className:'',html:'<div class="pin"></div>',iconSize:[22,22],iconAnchor:[11,24]})})
+    .bindTooltip('Punto de referencia',{direction:'top',offset:[0,-22]}).addTo(map);
+  refMarker.on('dragend',e=>{const p=e.target.getLatLng(); setRef([p.lat,p.lng],'Punto movido');});
+}
+function refModule(rows){
+  const mod=$('#refMod'); if(!REF){mod.hidden=true;return;} mod.hidden=false;
+  const comp=rows.filter(d=>!d.own).map(d=>({...d,dist:distTo(d)})).sort((a,b)=>a.dist-b.dist);
+  const near=comp.slice(0,RAD?comp.length:8);
+  $('#refTitle').textContent = RAD? `Competencia a ${fmtD(RAD)} del punto` : 'Los 8 proyectos más cercanos al punto';
+  $('#refSub').textContent = `Referencia ${REF[0]}, ${REF[1]}. Distancias en línea recta. Respeta los demás filtros.`;
+  const m2=near.map(d=>d.m2), pr=near.map(d=>d.precio), ar=near.map(d=>d.area);
+  const k=[['Proyectos',near.length,''],['COP/m² promedio',near.length?fmtCOP(avg(m2)):'—',''],['Precio desde prom.',near.length?fmtM(avg(pr)):'—',''],['Área desde prom.',near.length?avg(ar).toFixed(1)+' m²':'—',''],['Más cercano',near.length?fmtD(near[0].dist):'—',near.length?near[0].n:'']];
+  $('#refKpis').innerHTML=k.map(([a,b,c])=>`<div class="kpi"><span class="k">${a}</span><span class="v">${b}</span><span class="d">${c}</span></div>`).join('');
+  $('#tNear').innerHTML = near.length? '<thead><tr><th>Proyecto</th><th class="r">Distancia</th><th>Barrio</th><th class="r">Precio desde</th><th class="r">COP/m²</th><th class="r">Área desde</th><th>Parqueadero</th></tr></thead><tbody>'+
+    near.map(d=>`<tr><td><button class="goto" data-id="${d.id}">${d.n}</button></td><td class="r">${fmtD(d.dist)}</td><td>${d.barrio}</td><td class="r">${fmtCOP(d.precio)}</td><td class="r"><span class="dot" style="background:${colorFor(d.m2,'m2')}"></span>${fmtCOP(d.m2)}</td><td class="r">${d.area.toFixed(1)} m²</td><td><span class="pill ${pillCls(d.parq)}">${d.parq}</span></td></tr>`).join('')+'</tbody>'
+    : '<tbody><tr><td>No hay proyectos dentro de este radio con los filtros actuales. Amplía el radio.</td></tr></tbody>';
+}
+$('#refGo').onclick=()=>{ const p=parseRef($('#refIn').value); if(!p){refMsg('No reconocí coordenadas. Usa el formato 4.6335, -74.0961 o pega un enlace de Google Maps que incluya las coordenadas.',true);return;} setRef(p); };
+$('#refIn').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#refGo').click(); });
+$('#refPick').onclick=()=>{ picking=!picking; $('#refPick').setAttribute('aria-pressed',picking); $('#map').classList.toggle('picking',picking); if(picking) refMsg('Haz clic en el mapa donde quieras el punto.'); };
+$('#refMe').onclick=()=>{
+  if(!navigator.geolocation){refMsg('Este navegador no permite obtener tu ubicación. Pega las coordenadas a mano.',true);return;}
+  refMsg('Buscando tu ubicación…');
+  navigator.geolocation.getCurrentPosition(p=>setRef([p.coords.latitude,p.coords.longitude],'Tu ubicación'),
+    ()=>refMsg('No se pudo obtener tu ubicación (permiso denegado o no disponible). Pega las coordenadas a mano.',true),{enableHighAccuracy:true,timeout:10000});
+};
+$('#refR').onchange=()=>{ RAD=+$('#refR').value; render(true); };
+$('#refClr').onclick=clearRef;
+$('#refMod').addEventListener('click',e=>{const b=e.target.closest('.goto'); if(b){const m=markers[b.dataset.id]; if(m){$('#map').scrollIntoView({behavior:'smooth',block:'center'}); map.setView(m.getLatLng(),16); m.openPopup();}}});
+// escala de color por quintiles de todo el set (estable al filtrar)
+function breaks(k){ const v=DATA.map(d=>d[k]).sort((a,b)=>a-b); return [0.2,0.4,0.6,0.8].map(q=>v[Math.floor(q*(v.length-1))]); }
+const BR = {m2:breaks('m2'), precio:breaks('precio')};
+function colorFor(v,k){ const b=BR[k]; const i = v<b[0]?0:v<b[1]?1:v<b[2]?2:v<b[3]?3:4; return css('--s'+(i+1)); }
+
+// ---------- MAPA ----------
+const map = L.map('map',{scrollWheelZoom:true,zoomControl:true}).setView([4.67,-74.07],12);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Tiles &copy; Esri — Esri, HERE, Garmin, &copy; OpenStreetMap', maxNativeZoom:16,maxZoom:18}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16,maxZoom:18}).addTo(map);
+map.setMaxZoom(18);
+const layer = L.layerGroup().addTo(map);
+// etiquetas permanentes solo con zoom cercano para evitar que se superpongan
+function syncLabels(){ $('#map').classList.toggle('hide-lbl', map.getZoom()<14); }
+map.on('zoomend',syncLabels);
+map.on('click',e=>{ if(!picking) return; picking=false; $('#refPick').setAttribute('aria-pressed',false); $('#map').classList.remove('picking'); setRef([e.latlng.lat,e.latlng.lng],'Punto marcado'); });
+const markers = {};
+function popup(d){
+  return `<div class="pp"><h4>${d.n}</h4><div class="b">${d.barrio} · ${d.loc}<br>${d.dir}${d.own?' (ubicación aproximada)':''}</div>
+  <dl><dt>Precio desde</dt><dd>${fmtCOP(d.precio)}</dd><dt>COP/m² desde</dt><dd>${fmtCOP(d.m2)}</dd>
+  <dt>Área desde</dt><dd>${d.area.toLocaleString('es-CO')} m²</dd><dt>Acabados</dt><dd>${d.acabTxt}</dd>
+  <dt>Parqueadero</dt><dd style="white-space:normal">${d.parqTxt}</dd></dl>
+  ${d.url?`<p style="margin:8px 0 0"><a href="${d.url}" target="_blank" rel="noopener">Ver proyecto ↗</a></p>`:''}</div>`;
+}
+function rScale(p){ const mn=235e6,mx=1422e6; return 7 + 11*Math.sqrt((p-mn)/(mx-mn)); }
+function drawMap(rows,focus){
+  layer.clearLayers();
+  rows.forEach(d=>{
+    let m;
+    if(d.own){
+      m = L.marker([d.lat,d.lng],{icon:L.divIcon({className:'',html:'<div class="dia" style="width:20px;height:20px"></div>',iconSize:[20,20],iconAnchor:[10,10]}),zIndexOffset:1000});
+    } else {
+      m = L.circleMarker([d.lat,d.lng],{radius:9,color:css('--surface'),weight:1.5,fillColor:colorFor(d[colorBy],colorBy),fillOpacity:.92});
+    }
+    m.bindPopup(popup(d)).bindTooltip(d.n,{permanent:true,direction:'right',offset:[8,0],className:'lbl'});
+    m.addTo(layer); markers[d.id]=m;
+  });
+  map.invalidateSize(); drawRef();
+  if(focus && REF){ if(refCircle) map.fitBounds(refCircle.getBounds().pad(0.05)); else map.setView(REF,Math.max(map.getZoom(),14)); }
+  else if(rows.length){ const pts=rows.map(d=>[d.lat,d.lng]); if(REF) pts.push(REF); map.fitBounds(L.latLngBounds(pts).pad(0.12),{maxZoom:15}); }
+  syncLabels(); drawLegend();
+}
+function drawLegend(){
+  const b=BR[colorBy], f = colorBy==='m2' ? (v=>(v/1e6).toFixed(1)) : (v=>Math.round(v/1e6));
+  $('#legend').innerHTML = `<div class="ttl">${colorBy==='m2'?'COP/m² desde (millones)':'Precio desde (millones COP)'}</div>
+  <div class="bar">${[1,2,3,4,5].map(i=>`<i style="background:var(--s${i})"></i>`).join('')}</div>
+  <div class="scale"><span>${f(b[0])}</span><span>${f(b[1])}</span><span>${f(b[2])}</span><span>${f(b[3])}</span></div>
+  
+  <div class="ownk"><span class="dia"></span> Futuro Quinta Paredes</div>`;
+}
+
+// ---------- KPIs ----------
+function kpis(rows){
+  const comp = rows.filter(d=>!d.own);
+  const m2=comp.map(d=>d.m2), pr=comp.map(d=>d.precio), ar=comp.map(d=>d.area);
+  const med = a => {const s=[...a].sort((x,y)=>x-y); const n=s.length; return n? (n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2):NaN;};
+  const cheapest = comp.slice().sort((a,b)=>a.precio-b.precio)[0];
+  const k = [
+    ['Proyectos', rows.length, comp.length+' competidores'],
+    ['COP/m² promedio', comp.length?fmtM2k(avg(m2)):'—', comp.length?'mediana '+fmtM2k(med(m2)):''],
+    ['Rango COP/m²', comp.length?fmtM2k(Math.min(...m2))+' – '+fmtM2k(Math.max(...m2)).replace('$',''):'—',''],
+    ['Precio desde promedio', comp.length?fmtM(avg(pr)):'—', cheapest?('menor: '+cheapest.n+' '+fmtM(cheapest.precio)):''],
+    ['Área desde promedio', comp.length?avg(ar).toFixed(1)+' m²':'—', comp.length?'mín '+Math.min(...ar).toFixed(1)+' · máx '+Math.max(...ar).toFixed(1)+' m²':''],
+  ];
+  $('#kpis').innerHTML = k.map(([a,b,c])=>`<div class="kpi"><span class="k">${a}</span><span class="v">${b}</span><span class="d">${c}</span></div>`).join('');
+  $('#count').textContent = rows.length + ' de ' + DATA.length + ' proyectos';
+}
+
+// ---------- BENCHMARK PROPIO ----------
+function bench(rows){
+  const comp = rows.filter(d=>!d.own);
+  const box=$('#bench');
+  if(comp.length<2){ box.innerHTML='<p class="d">Se necesitan al menos 2 competidores en el filtro para comparar.</p>'; $('#benchTxt').textContent=''; return; }
+  const items=[['COP/m² desde','m2',fmtCOP],['Precio desde','precio',fmtM],['Área desde','area',v=>v.toFixed(1)+' m²']];
+  const txt=[];
+  box.innerHTML = items.map(([lab,k,f])=>{
+    const vals=comp.map(d=>d[k]).concat(OWN[k]); const mn=Math.min(...vals), mx=Math.max(...vals);
+    const pos=v=>((v-mn)/(mx-mn||1)*100).toFixed(1)+'%';
+    const a=avg(comp.map(d=>d[k])); const below=comp.filter(d=>d[k]<OWN[k]).length;
+    const diff=(OWN[k]/a-1)*100;
+    txt.push(`${lab.toLowerCase()} ${diff>=0?'+':''}${diff.toFixed(0)}% vs. promedio`);
+    return `<div class="bm"><span class="k">${lab}</span><span class="v">${f(OWN[k])}</span>
+      <div class="track" aria-hidden="true"><div class="ln"></div>${comp.map(d=>`<div class="tk" style="left:${pos(d[k])}" title="${d.n}"></div>`).join('')}
+      <div class="avg" style="left:${pos(a)}"></div><div class="me" style="left:${pos(OWN[k])}"></div></div>
+      <span class="d">Promedio ${f(a)} · ${below} de ${comp.length} proyectos por debajo</span></div>`;
+  }).join('');
+  $('#benchTxt').textContent = 'Futuro Quinta Paredes: ' + txt.join('; ') + ' (comparado con los ' + comp.length + ' competidores del filtro).';
+}
+
+// ---------- TABLAS RESUMEN ----------
+function groupTable(rows, key, order){
+  const g={}; rows.forEach(d=>{(g[d[key]]=g[d[key]]||[]).push(d);});
+  let keys=Object.keys(g); keys = order? order.filter(k=>g[k]) : keys.sort((a,b)=>avg(g[b].map(d=>d.m2))-avg(g[a].map(d=>d.m2)));
+  return keys.map(k=>{const a=g[k]; return {k,n:a.length,m2:avg(a.map(d=>d.m2)),mn:Math.min(...a.map(d=>d.m2)),mx:Math.max(...a.map(d=>d.m2)),pr:avg(a.map(d=>d.precio)),ar:avg(a.map(d=>d.area))};});
+}
+function renderGroup(id, title, g, dotFn){
+  $(id).innerHTML = `<thead><tr><th>${title}</th><th class="r">N</th><th class="r">COP/m² prom.</th><th class="r">Mín – máx</th><th class="r">Precio prom.</th><th class="r">Área prom.</th></tr></thead><tbody>`+
+   g.map(r=>`<tr><td>${dotFn?dotFn(r.k):''}${r.k}</td><td class="r">${r.n}</td><td class="r">${fmtCOP(r.m2)}</td><td class="r">${(r.mn/1e6).toFixed(1)} – ${(r.mx/1e6).toFixed(1)} M</td><td class="r">${fmtM(r.pr)}</td><td class="r">${r.ar.toFixed(1)} m²</td></tr>`).join('')+'</tbody>';
+}
+function compactGroup(id,title,g){
+  $(id).innerHTML = `<thead><tr><th>${title}</th><th class="r">N</th><th class="r">COP/m² prom.</th><th class="r">Precio prom.</th><th class="r">Área prom.</th></tr></thead><tbody>`+
+   g.map(r=>`<tr><td>${r.k}</td><td class="r">${r.n}</td><td class="r">${fmtCOP(r.m2)}</td><td class="r">${fmtM(r.pr)}</td><td class="r">${r.ar.toFixed(1)} m²</td></tr>`).join('')+'</tbody>';
+}
+const areaBand = a => a<30?'< 30 m²':a<50?'30 – 50 m²':a<80?'50 – 80 m²':'≥ 80 m²';
+const BANDS=['< 30 m²','30 – 50 m²','50 – 80 m²','≥ 80 m²'];
+
+// ---------- CHARTS ----------
+const charts={};
+function baseOpts(){
+  const ink=css('--muted'), grid=css('--line');
+  Chart.defaults.font.family = css('--f-body'); Chart.defaults.color = ink;
+  return {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{grid:{color:grid},ticks:{color:ink}},y:{grid:{color:grid},ticks:{color:ink}}}};
+}
+function mk(id,cfg){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart($(id),cfg); }
+const avgLine = (val,axis) => ({id:'avgline',afterDatasetsDraw(c){ if(!isFinite(val)) return; const s=c.scales[axis], a=c.chartArea, ctx=c.ctx; ctx.save(); ctx.strokeStyle=css('--accent'); ctx.setLineDash([5,4]); ctx.lineWidth=1.5; ctx.beginPath();
+  if(axis==='x'){const x=s.getPixelForValue(val); ctx.moveTo(x,a.top); ctx.lineTo(x,a.bottom);} else {const y=s.getPixelForValue(val); ctx.moveTo(a.left,y); ctx.lineTo(a.right,y);} ctx.stroke(); ctx.restore(); }});
+
+function charts_(rows){
+  const comp=rows.filter(d=>!d.own), A=avg(comp.map(d=>d.m2));
+  // localidad
+  const gL = groupTable(rows,'loc');
+  renderGroup('#tLoc','Localidad',gL,k=>`<span class="dot" style="background:${LOC_COL[k]}"></span>`);
+  let o=baseOpts(); o.scales.y.ticks.callback=v=>(v/1e6).toFixed(0)+' M';
+  mk('#chLoc',{type:'bar',data:{labels:gL.map(r=>r.k),datasets:[{data:gL.map(r=>r.m2),backgroundColor:gL.map(r=>LOC_COL[r.k]),borderRadius:4}]},
+    options:{...o,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'COP/m² prom.: '+fmtCOP(c.raw)}}}},plugins:[avgLine(A,'y')]});
+  if(gL.length){const t=gL[0], b=gL[gL.length-1]; $('#iLoc').textContent = gL.length>1 ? `${t.k} tiene el COP/m² promedio más alto (${fmtCOP(t.m2)}), ${((t.m2/b.m2-1)*100).toFixed(0)}% por encima de ${b.k} (${fmtCOP(b.m2)}).` : `Solo ${t.k} en el filtro actual.`;}
+  // área
+  const rowsB = rows.map(d=>({...d,band:areaBand(d.area)}));
+  const gA = groupTable(rowsB,'band',BANDS); renderGroup('#tArea','Área desde',gA);
+  o=baseOpts(); o.scales.y.ticks.callback=v=>(v/1e6).toFixed(0)+' M'; o.plugins.legend={display:true,position:'bottom',labels:{boxWidth:12}};
+  o.scales.y1={position:'right',grid:{display:false},ticks:{color:css('--muted'),callback:v=>(v/1e6).toFixed(0)+' M'}};
+  mk('#chArea',{type:'bar',data:{labels:gA.map(r=>r.k),datasets:[
+    {label:'COP/m² prom.',data:gA.map(r=>r.m2),backgroundColor:css('--accent'),borderRadius:4,yAxisID:'y'},
+    {label:'Precio prom.',data:gA.map(r=>r.pr),backgroundColor:css('--s1'),borderRadius:4,yAxisID:'y1'}]},options:o});
+  if(gA.length){const hi=gA.slice().sort((a,b)=>b.m2-a.m2)[0]; $('#iArea').textContent=`El rango ${hi.k} tiene el COP/m² más alto (${fmtCOP(hi.m2)}) con ${hi.n} proyecto${hi.n>1?'s':''}.`;}
+  // scatter
+  o=baseOpts(); o.scales.x.title={display:true,text:'Área desde (m²)'}; o.scales.y.title={display:true,text:'Precio desde (millones)'}; o.scales.y.ticks.callback=v=>(v/1e6).toFixed(0);
+  o.plugins.tooltip={callbacks:{label:c=>{const d=c.raw.d; return `${d.n}: ${d.area} m² · ${fmtM(d.precio)}`;}}};
+  o.plugins.legend={display:true,position:'bottom',labels:{boxWidth:10,usePointStyle:true}};
+  const locs=[...new Set(rows.map(d=>d.loc))];
+  mk('#chSc',{type:'scatter',data:{datasets:locs.map(l=>({label:l,data:rows.filter(d=>d.loc===l).map(d=>({x:d.area,y:d.precio,d})),
+    backgroundColor:LOC_COL[l],pointRadius:rows.filter(d=>d.loc===l).map(d=>d.own?9:5),pointStyle:rows.filter(d=>d.loc===l).map(d=>d.own?'rectRot':'circle'),pointHoverRadius:8}))},options:o});
+  // parq/acab
+  compactGroup('#tParq','Parqueadero',groupTable(rows,'parq'));
+  compactGroup('#tAcab','Acabados',groupTable(rows,'acab'));
+  const gp=groupTable(comp,'parq'), pv=gp.find(r=>r.k==='Privado'), cm=gp.find(r=>r.k==='Comunal');
+  $('#iPA').textContent = pv&&cm ? `Los proyectos con parqueadero privado promedian ${fmtCOP(pv.m2)}/m² y tickets de ${fmtM(pv.pr)}; los de parqueadero comunal, ${fmtCOP(cm.m2)}/m² y ${fmtM(cm.pr)}.` : '';
+  // ranking
+  const rk=rows.slice().sort((a,b)=>b.m2-a.m2);
+  $('#cvRank').style.height = Math.max(220, rk.length*20+60)+'px';
+  o=baseOpts(); o.indexAxis='y'; o.scales.x.ticks.callback=v=>(v/1e6).toFixed(0)+' M'; o.scales.y.grid={display:false};
+  o.plugins.tooltip={callbacks:{label:c=>fmtCOP(c.raw)+' /m²'}};
+  mk('#chRank',{type:'bar',data:{labels:rk.map(d=>d.n),datasets:[{data:rk.map(d=>d.m2),backgroundColor:rk.map(d=>d.own?css('--own'):colorFor(d.m2,'m2')),borderRadius:3,barThickness:13}]},options:o,plugins:[avgLine(A,'x')]});
+}
+
+// ---------- TABLA MAESTRA ----------
+let sortK='precio', sortDir='desc';
+const COLS=[['n','Proyecto'],['loc','Localidad'],['barrio','Barrio'],['dir','Dirección'],['precio','Precio desde','r'],['m2','COP/m²','r'],['area','Área desde','r'],['acab','Acabados'],['parq','Parqueadero'],['url','Fuente']];
+function pillCls(p){return p==='Privado'?'priv':p==='Comunal'?'com':p.startsWith('Mixto')?'mix':'';}
+function table(rows){
+  const cols = REF? COLS.slice(0,4).concat([['dist','Distancia','r']],COLS.slice(4)) : COLS;
+  if(!REF && sortK==='dist') sortK='precio';
+  const r=rows.map(d=>({...d,dist:distTo(d)})).slice().sort((a,b)=>{const x=a[sortK],y=b[sortK]; const c= typeof x==='number'? x-y : String(x).localeCompare(String(y),'es'); return sortDir==='asc'?c:-c;});
+  $('#tAll').innerHTML = '<thead><tr>'+cols.map(([k,l,c])=>`<th class="sort ${c||''}" data-k="${k}" ${k===sortK?`data-dir="${sortDir}"`:''} tabindex="0">${l}</th>`).join('')+'</tr></thead><tbody>'+
+  r.map(d=>`<tr class="${d.own?'own':''}"><td><button class="goto" data-id="${d.id}">${d.n}</button></td><td><span class="dot" style="background:${LOC_COL[d.loc]}"></span>${d.loc}</td><td>${d.barrio}</td><td>${d.dir}</td>${REF?`<td class="r">${fmtD(d.dist)}</td>`:''}
+   <td class="r">${fmtCOP(d.precio)}</td><td class="r"><span class="dot" style="background:${colorFor(d.m2,'m2')}"></span>${fmtCOP(d.m2)}</td><td class="r">${d.area.toFixed(1)} m²</td>
+   <td>${d.acab}</td><td><span class="pill ${pillCls(d.parq)}">${d.parq}</span></td><td>${d.url?`<a class="lk" href="${d.url}" target="_blank" rel="noopener">Abrir ↗</a>`:'<span style="color:var(--muted)">Propio</span>'}</td></tr>`).join('')+'</tbody>';
+}
+$('#tAll').addEventListener('click',e=>{
+  const th=e.target.closest('th.sort'); if(th){const k=th.dataset.k; sortDir = (k===sortK && sortDir==='desc')?'asc':'desc'; sortK=k; table(filtered()); return;}
+  const b=e.target.closest('.goto'); if(b){const m=markers[b.dataset.id]; if(m){ $('#map').scrollIntoView({behavior:'smooth',block:'center'}); map.setView(m.getLatLng(),16); m.openPopup(); }}
+});
+$('#tAll').addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.matches('th.sort')) e.target.click(); });
+
+function render(focus){ const rows=filtered(); if(focus===true && REF){sortK='dist';sortDir='asc';} drawMap(rows,focus===true); kpis(rows); refModule(rows); bench(rows); charts_(rows); table(rows); }
+['#fLoc','#fParq','#fAcab','#fArea'].forEach(s=>$(s).addEventListener('change',()=>render()));
+$('#reset').addEventListener('click',()=>{['#fLoc','#fParq','#fAcab','#fArea'].forEach(s=>$(s).value=''); render();});
+$('#refR').value='0';
+function setColor(k){ colorBy=k; $('#cM2').setAttribute('aria-pressed',k==='m2'); $('#cPr').setAttribute('aria-pressed',k==='precio'); drawMap(filtered()); }
+$('#cM2').onclick=()=>setColor('m2'); $('#cPr').onclick=()=>setColor('precio');
+render();
+</script>
+</body>
+</html>
